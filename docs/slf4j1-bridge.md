@@ -3,7 +3,7 @@ id: slf4j1-bridge
 title: "SLF4J v1 bridge"
 ---
 
-It is possible to use `zio-logging` for SLF4J loggers, usually third-party non-ZIO libraries. To do so, import the `zio-logging-slf4j-bridge` module for SLF4J v1:
+It is possible to use `zio-logging` for SLF4J loggers, usually third-party non-ZIO libraries. To do so, import the `zio-logging-slf4j-bridge` module for SLF4J v1 (working with JDK8):
 
 ```scala
 libraryDependencies += "dev.zio" %% "zio-logging-slf4j-bridge" % "@VERSION@"
@@ -36,8 +36,9 @@ SLF4J bridge with custom logger can be setup:
 
 ```scala
 import zio.logging.slf4j.Slf4jBridge
+import zio.logging.consoleJsonLogger
 
-val logger = Runtime.removeDefaultLoggers >>> zio.logging.consoleJson(LogFormat.default, LogLevel.Debug) >+> Slf4jBridge.initialize
+val logger = Runtime.removeDefaultLoggers >>> consoleJsonLogger() >+> Slf4jBridge.initialize
 ```
 
 <br/>
@@ -55,7 +56,14 @@ ZIO logging. Enabling both causes circular logging and makes no sense.
 ```scala
 package zio.logging.slf4j.bridge
 
-import zio.logging.{ LogFilter, LogFormat, LoggerNameExtractor, consoleJson }
+import zio.logging.slf4j.bridge.Slf4jBridge
+import zio.logging.{
+  ConsoleLoggerConfig,
+  LogFilter,
+  LogFormat,
+  LoggerNameExtractor,
+  consoleJsonLogger
+}
 import zio.{ ExitCode, LogLevel, Runtime, Scope, ZIO, ZIOAppArgs, ZIOAppDefault, ZLayer }
 
 object Slf4jBridgeExampleApp extends ZIOAppDefault {
@@ -69,9 +77,11 @@ object Slf4jBridgeExampleApp extends ZIOAppDefault {
   )
 
   override val bootstrap: ZLayer[ZIOAppArgs, Any, Any] =
-    Runtime.removeDefaultLoggers >>> consoleJson(
-      LogFormat.label("name", LoggerNameExtractor.loggerNameAnnotationOrTrace.toLogFormat()) + LogFormat.default,
-      logFilter
+    Runtime.removeDefaultLoggers >>> consoleJsonLogger(
+      ConsoleLoggerConfig(
+        LogFormat.label("name", LoggerNameExtractor.loggerNameAnnotationOrTrace.toLogFormat()) + LogFormat.default,
+        logFilter
+      )
     ) >+> Slf4jBridge.initialize
 
   override def run: ZIO[Scope, Any, ExitCode] =

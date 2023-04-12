@@ -1,15 +1,48 @@
 import BuildHelper._
+import Versions._
 import MimaSettings.mimaSettings
 import sbtcrossproject.CrossPlugin.autoImport.{ CrossType, crossProject }
+import zio.sbt.githubactions.Condition
+import zio.sbt.githubactions.Step.SingleStep
 
-name := "zio-logging"
+enablePlugins(ZioSbtEcosystemPlugin, ZioSbtCiPlugin)
 
 inThisBuild(
   List(
-    organization := "dev.zio",
-    homepage     := Some(url("https://zio.dev/zio-logging/")),
-    licenses     := List("Apache-2.0" -> url("http://www.apache.org/licenses/LICENSE-2.0")),
-    developers   := List(
+    name                   := "zio-logging",
+    ciEnabledBranches      := Seq("master"),
+    crossScalaVersions -= scala211.value,
+    supportedScalaVersions :=
+      Map(
+        (coreJS / thisProject).value.id       -> (coreJS / crossScalaVersions).value,
+        (coreJVM / thisProject).value.id      -> (coreJVM / crossScalaVersions).value,
+        (jpl / thisProject).value.id          -> (jpl / crossScalaVersions).value,
+        (slf4j / thisProject).value.id        -> (slf4j / crossScalaVersions).value,
+        (slf4j2 / thisProject).value.id       -> (slf4j2 / crossScalaVersions).value,
+        (slf4jBridge / thisProject).value.id  -> (slf4jBridge / crossScalaVersions).value,
+        (slf4j2Bridge / thisProject).value.id -> (slf4j2Bridge / crossScalaVersions).value
+      ),
+    supportedJavaPlatform  := Map(
+      (slf4j2 / thisProject).value.id       -> (slf4j2 / javaPlatform).value,
+      (slf4j2Bridge / thisProject).value.id -> (slf4j2Bridge / javaPlatform).value,
+      (jpl / thisProject).value.id          -> (jpl / javaPlatform).value
+    ),
+    ciExtraTestSteps       := Seq(
+      SingleStep(
+        name = "Compile additional subprojects",
+        condition = Some(
+          (Condition.Expression("startsWith(matrix.scala, '2.12.')") || Condition.Expression(
+            "startsWith(matrix.scala, '2.13.')"
+          )) && Condition.Expression("matrix.java == '11'")
+        ),
+        run = Some(
+          "sbt ++${{ matrix.scala }} examplesCore/compile examplesJpl/compile examplesSlf4j2Bridge/compile " +
+            "examplesSlf4jLogback/compile examplesSlf4j2Logback/compile examplesSlf4j2Log4j/compile benchmarks/compile"
+        )
+      )
+    ),
+    parallelTestExecution  := false,
+    developers             := List(
       Developer("jdegoes", "John De Goes", "john@degoes.net", url("http://degoes.net")),
       Developer(
         "pshemass",
@@ -18,31 +51,9 @@ inThisBuild(
         url("https://github.com/pshemass")
       ),
       Developer("justcoon", "Peter Kotula", "peto.kotula@yahoo.com", url("https://github.com/justcoon"))
-    )
+    ),
+    zioVersion             := "2.0.12"
   )
-)
-
-val ZioVersion     = "2.0.6"
-val slf4jVersion   = "1.7.36"
-val slf4j2Version  = "2.0.6"
-val logbackVersion = "1.2.11"
-
-addCommandAlias("fix", "; all compile:scalafix test:scalafix; all scalafmtSbt scalafmtAll")
-addCommandAlias("check", "; scalafmtSbtCheck; scalafmtCheckAll; compile:scalafix --check; test:scalafix --check")
-
-addCommandAlias(
-  "testJVM8",
-  ";coreJVM/test;slf4j/test;slf4jBridge/test"
-)
-
-addCommandAlias(
-  "testJVM",
-  ";coreJVM/test;slf4j/test;jpl/test;slf4jBridge/test;slf4j2Bridge/test"
-)
-
-addCommandAlias(
-  "testJS",
-  ";coreJS/test"
 )
 
 addCommandAlias(
@@ -55,20 +66,33 @@ lazy val root = project
   .settings(
     publish / skip := true
   )
-  .aggregate(coreJVM, coreJS, slf4j, slf4jBridge, slf4j2Bridge, jpl, benchmarks, examples, docs)
+  .aggregate(
+    coreJVM,
+    coreJS,
+    slf4j,
+    slf4j2,
+    slf4jBridge,
+    slf4j2Bridge,
+    jpl,
+    benchmarks,
+    examplesCore,
+    examplesJpl,
+    examplesSlf4j2Bridge,
+    examplesSlf4jLogback,
+    examplesSlf4j2Logback,
+    examplesSlf4j2Log4j,
+    docs
+  )
 
 lazy val core = crossProject(JSPlatform, JVMPlatform)
   .crossType(CrossType.Full)
   .in(file("core"))
-  .settings(stdSettings("zio-logging"))
+  .settings(stdSettings("zio-logging", turnCompilerWarningIntoErrors = false))
+  .settings(enableZIO(enableStreaming = true))
   .settings(
     libraryDependencies ++= Seq(
-      "dev.zio" %%% "zio"          % ZioVersion,
-      "dev.zio" %%% "zio-streams"  % ZioVersion,
-      "dev.zio" %%% "zio-test"     % ZioVersion % Test,
-      "dev.zio" %%% "zio-test-sbt" % ZioVersion % Test
-    ),
-    testFrameworks := Seq(new TestFramework("zio.test.sbt.ZTestFramework"))
+      "dev.zio" %%% "zio-parser" % zioParser
+    )
   )
   .jvmSettings(
     Test / fork := true,
@@ -78,78 +102,83 @@ lazy val core = crossProject(JSPlatform, JVMPlatform)
 
 lazy val coreJVM = core.jvm
 lazy val coreJS  = core.js.settings(
-  libraryDependencies += "io.github.cquiroz" %%% "scala-java-time" % "2.4.0" % Test
+  crossScalaVersions -= scala211.value,
+  libraryDependencies += "io.github.cquiroz" %%% "scala-java-time" % scalaJavaTimeVersion % Test
 )
 
 lazy val slf4j = project
   .in(file("slf4j"))
   .dependsOn(coreJVM)
-  .settings(stdSettings("zio-logging-slf4j"))
+  .settings(stdSettings("zio-logging-slf4j", turnCompilerWarningIntoErrors = false))
+  .settings(enableZIO())
   .settings(mimaSettings(failOnProblem = true))
   .settings(
     libraryDependencies ++= Seq(
       "org.slf4j"               % "slf4j-api"                % slf4jVersion,
-      "dev.zio"               %%% "zio-test"                 % ZioVersion     % Test,
-      "dev.zio"               %%% "zio-test-sbt"             % ZioVersion     % Test,
-      "ch.qos.logback"          % "logback-classic"          % logbackVersion % Test,
-      "net.logstash.logback"    % "logstash-logback-encoder" % "6.6"          % Test,
-      "org.scala-lang.modules" %% "scala-collection-compat"  % "2.9.0"        % Test
-    ),
-    testFrameworks := Seq(new TestFramework("zio.test.sbt.ZTestFramework"))
+      "ch.qos.logback"          % "logback-classic"          % logbackVersion                % Test,
+      "net.logstash.logback"    % "logstash-logback-encoder" % logstashLogbackEncoderVersion % Test,
+      "org.scala-lang.modules" %% "scala-collection-compat"  % scalaCollectionCompatVersion  % Test
+    )
+  )
+
+lazy val slf4j2 = project
+  .in(file("slf4j2"))
+  .dependsOn(coreJVM)
+  .settings(stdSettings("zio-logging-slf4j2", javaPlatform = "11", turnCompilerWarningIntoErrors = false))
+  .settings(enableZIO())
+  .settings(mimaSettings(failOnProblem = true))
+  .settings(
+    libraryDependencies ++= Seq(
+      "org.slf4j"               % "slf4j-api"                % slf4j2Version,
+      "ch.qos.logback"          % "logback-classic"          % logback2Version              % Test,
+      "net.logstash.logback"    % "logstash-logback-encoder" % "7.3"                        % Test,
+      "org.scala-lang.modules" %% "scala-collection-compat"  % scalaCollectionCompatVersion % Test
+    )
   )
 
 lazy val slf4jBridge = project
   .in(file("slf4j-bridge"))
   .dependsOn(coreJVM)
-  .settings(stdSettings("zio-logging-slf4j-bridge"))
+  .settings(stdSettings("zio-logging-slf4j-bridge", turnCompilerWarningIntoErrors = false))
+  .settings(enableZIO())
   .settings(mimaSettings(failOnProblem = true))
   .settings(
     libraryDependencies ++= Seq(
       "org.slf4j"               % "slf4j-api"               % slf4jVersion,
-      "org.scala-lang.modules" %% "scala-collection-compat" % "2.9.0",
-      "dev.zio"               %%% "zio-test"                % ZioVersion % Test,
-      "dev.zio"               %%% "zio-test-sbt"            % ZioVersion % Test
-    ),
-    testFrameworks := Seq(new TestFramework("zio.test.sbt.ZTestFramework"))
+      "org.scala-lang.modules" %% "scala-collection-compat" % scalaCollectionCompatVersion
+    )
   )
 
 lazy val slf4j2Bridge = project
   .in(file("slf4j2-bridge"))
   .dependsOn(coreJVM)
-  .settings(stdSettings("zio-logging-slf4j2-bridge", "9"))
+  .settings(stdSettings("zio-logging-slf4j2-bridge", javaPlatform = "9", turnCompilerWarningIntoErrors = false))
+  .settings(enableZIO())
   .settings(mimaSettings(failOnProblem = true))
   .settings(
-    compileOrder                           := CompileOrder.JavaThenScala,
-    javacOptions                           := jpmsOverwriteModulePath((Compile / dependencyClasspath).value.map(_.data))(javacOptions.value),
-    javaOptions                            := jpmsOverwriteModulePath((Compile / dependencyClasspath).value.map(_.data))(javaOptions.value),
-    Compile / packageDoc / publishArtifact := false // module-info.java compilation issue
+    compileOrder            := CompileOrder.JavaThenScala,
+    javacOptions            := jpmsOverwriteModulePath((Compile / dependencyClasspath).value.map(_.data))(javacOptions.value),
+    javaOptions             := jpmsOverwriteModulePath((Compile / dependencyClasspath).value.map(_.data))(javaOptions.value),
+    Compile / doc / sources := Seq.empty // module-info.java compilation issue
   )
   .settings(
     libraryDependencies ++= Seq(
       "org.slf4j"               % "slf4j-api"               % slf4j2Version,
-      "org.scala-lang.modules" %% "scala-collection-compat" % "2.8.1",
-      "dev.zio"               %%% "zio-test"                % ZioVersion % Test,
-      "dev.zio"               %%% "zio-test-sbt"            % ZioVersion % Test
-    ),
-    testFrameworks := Seq(new TestFramework("zio.test.sbt.ZTestFramework"))
+      "org.scala-lang.modules" %% "scala-collection-compat" % "2.8.1"
+    )
   )
+  .settings(enableZIO())
 
 lazy val jpl = project
   .in(file("jpl"))
   .dependsOn(coreJVM)
-  .settings(stdSettings("zio-logging-jpl", "9"))
+  .settings(stdSettings("zio-logging-jpl", javaPlatform = "9", turnCompilerWarningIntoErrors = false))
+  .settings(enableZIO(enableTesting = true))
   .settings(mimaSettings(failOnProblem = true))
-  .settings(
-    libraryDependencies ++= Seq(
-      "dev.zio" %%% "zio-test"     % ZioVersion % Test,
-      "dev.zio" %%% "zio-test-sbt" % ZioVersion % Test
-    ),
-    testFrameworks := Seq(new TestFramework("zio.test.sbt.ZTestFramework"))
-  )
 
 lazy val benchmarks = project
   .in(file("benchmarks"))
-  .settings(stdSettings("zio-logging-benchmarks"))
+  .settings(stdSettings("zio-logging-benchmarks", turnCompilerWarningIntoErrors = false))
   .settings(
     publish / skip := true,
     scalacOptions -= "-Yno-imports",
@@ -158,36 +187,81 @@ lazy val benchmarks = project
   .dependsOn(coreJVM)
   .enablePlugins(JmhPlugin)
 
-lazy val examples = project
-  .in(file("examples"))
-  .dependsOn(slf4j, jpl)
-  .settings(stdSettings("zio-logging-examples"))
+lazy val examplesCore = project
+  .in(file("examples/core"))
+  .dependsOn(coreJVM)
+  .settings(stdSettings("zio-logging-examples-core", turnCompilerWarningIntoErrors = false))
+  .settings(enableZIO())
+  .settings(
+    publish / skip := true,
+    libraryDependencies ++= Seq(
+      "dev.zio" %% "zio-metrics-connectors" % zioMetricsConnectorsVersion,
+      "dev.zio" %% "zio-config-typesafe"    % zioConfig
+    )
+  )
+
+lazy val examplesSlf4jLogback = project
+  .in(file("examples/slf4j-logback"))
+  .dependsOn(slf4j)
+  .settings(stdSettings("zio-logging-examples-slf4j-logback", turnCompilerWarningIntoErrors = false))
   .settings(
     publish / skip := true,
     libraryDependencies ++= Seq(
       "ch.qos.logback"       % "logback-classic"          % logbackVersion,
-      "net.logstash.logback" % "logstash-logback-encoder" % "6.6",
-      "dev.zio"             %% "zio-metrics-connectors"   % "2.0.4",
-      "dev.zio"            %%% "zio-test"                 % ZioVersion % Test,
-      "dev.zio"            %%% "zio-test-sbt"             % ZioVersion % Test
+      "net.logstash.logback" % "logstash-logback-encoder" % logstashLogbackEncoderVersion
     )
+  )
+
+lazy val examplesSlf4j2Logback = project
+  .in(file("examples/slf4j2-logback"))
+  .dependsOn(slf4j2)
+  .settings(stdSettings("zio-logging-examples-slf4j2-logback", turnCompilerWarningIntoErrors = false))
+  .settings(
+    publish / skip := true,
+    libraryDependencies ++= Seq(
+      "ch.qos.logback"       % "logback-classic"          % logback2Version,
+      "net.logstash.logback" % "logstash-logback-encoder" % "7.3"
+    )
+  )
+
+lazy val examplesSlf4j2Log4j = project
+  .in(file("examples/slf4j2-log4j"))
+  .dependsOn(slf4j2)
+  .settings(stdSettings("zio-logging-examples-slf4j2-log4j", turnCompilerWarningIntoErrors = false))
+  .settings(
+    publish / skip := true,
+    libraryDependencies ++= Seq(
+      "org.apache.logging.log4j" % "log4j-slf4j2-impl" % "2.20.0",
+      "org.apache.logging.log4j" % "log4j-core"        % "2.20.0"
+    )
+  )
+
+lazy val examplesJpl = project
+  .in(file("examples/jpl"))
+  .dependsOn(jpl)
+  .settings(stdSettings("zio-logging-examples-jpl", turnCompilerWarningIntoErrors = false))
+  .settings(
+    publish / skip := true
+  )
+
+lazy val examplesSlf4j2Bridge = project
+  .in(file("examples/slf4j2-bridge"))
+  .dependsOn(slf4j2Bridge)
+  .settings(stdSettings("zio-logging-examples-slf4j2-bridge", turnCompilerWarningIntoErrors = false))
+  .settings(
+    publish / skip := true
   )
 
 lazy val docs = project
   .in(file("zio-logging-docs"))
   .settings(
     moduleName                                 := "zio-logging-docs",
-    scalacOptions -= "-Yno-imports",
-    scalacOptions -= "-Xfatal-warnings",
-    projectName                                := "ZIO Logging",
-    badgeInfo                                  := Some(
-      BadgeInfo(
-        artifact = "zio-logging_2.12",
-        projectStage = ProjectStage.ProductionReady
-      )
-    ),
-    docsPublishBranch                          := "master",
-    ScalaUnidoc / unidoc / unidocProjectFilter := inProjects(coreJVM, slf4j, slf4jBridge, jpl)
+    crossScalaVersions                         := Seq(scala213.value),
+    projectName                                := (ThisBuild / name).value,
+    mainModuleName                             := (coreJVM / name).value,
+    ScalaUnidoc / unidoc / unidocProjectFilter := inProjects(coreJVM, slf4j, slf4jBridge, jpl),
+    projectStage                               := ProjectStage.ProductionReady,
+    publish / skip                             := true
   )
   .settings(macroDefinitionSettings)
   .dependsOn(coreJVM, coreJS, slf4j, slf4jBridge, jpl)

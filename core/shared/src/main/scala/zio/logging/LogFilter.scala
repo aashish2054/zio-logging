@@ -15,7 +15,7 @@
  */
 package zio.logging
 
-import zio.{ Cause, FiberId, FiberRefs, LogLevel, LogSpan, Trace, ZLogger }
+import zio.{ Cause, Chunk, Config, FiberId, FiberRefs, LogLevel, LogSpan, Trace, ZLogger }
 
 import scala.annotation.tailrec
 
@@ -136,6 +136,41 @@ sealed trait LogFilter[-Message] { self =>
 
 object LogFilter {
 
+  /**
+   * Defines a filter from a list of log-levels specified per tree node
+   *
+   * Example:
+   *
+   * {{{
+   *   val filter =
+   *     logLevelByName(
+   *      LogLevel.Debug,
+   *      "io.netty"                                       -> LogLevel.Info,
+   *      "io.grpc.netty"                                  -> LogLevel.Info
+   * )
+   * }}}
+   *
+   * will use the `Debug` log level for everything except for log events with the logger name
+   * prefixed by either `List("io", "netty")` or `List("io", "grpc", "netty")`.
+   * Logger name is extracted from [[Trace]].
+   *
+   * @param rootLevel Minimum log level for the root node
+   * @param mappings  List of mappings, nesting defined by dot-separated strings
+   */
+  final case class LogLevelByNameConfig(rootLevel: LogLevel, mappings: Map[String, LogLevel])
+
+  object LogLevelByNameConfig {
+
+    val config: Config[LogLevelByNameConfig] = {
+      val rootLevelConfig = Config.logLevel.nested("rootLevel").withDefault(LogLevel.Info)
+      val mappingsConfig  = Config.table("mappings", Config.logLevel).withDefault(Map.empty)
+
+      (rootLevelConfig ++ mappingsConfig).map { case (rootLevel, mappings) =>
+        LogLevelByNameConfig(rootLevel, mappings)
+      }
+    }
+  }
+
   def apply[M, V](
     group0: LogGroup[M, V],
     predicate0: V => Boolean
@@ -232,10 +267,42 @@ object LogFilter {
     val mappingsSorted = mappings.map(splitNameByDotAndLevel.tupled).sorted(nameLevelOrdering)
     val nameGroup      = group.map(splitNameByDot)
 
+    @tailrec
+    def globStarCompare(l: List[String], m: List[String]): Boolean =
+      (l, m) match {
+        case (_, Nil)           => true
+        case (Nil, _)           => false
+        case (l @ (_ :: ls), m) =>
+          // try a regular, routesCompare or check if skipping paths (globstar pattern) results in a matching path
+          l.startsWith(m) || compareRoutes(l, m) || globStarCompare(ls, m)
+      }
+
+    @tailrec
+    def anystringCompare(l: String, m: List[String]): Boolean = m match {
+      case mh :: ms =>
+        val startOfMh = l.indexOfSlice(mh)
+        if (startOfMh >= 0) anystringCompare(l.drop(startOfMh + mh.size), ms)
+        else false
+      case Nil      => l.isEmpty()
+    }
+
+    @tailrec
+    def compareRoutes(l: List[String], m: List[String]): Boolean =
+      (l, m) match {
+        case (_, Nil)                                  => true
+        case (Nil, _)                                  => false
+        case (_ :: ls, "*" :: ms)                      => compareRoutes(ls, ms)
+        case (l, "**" :: ms)                           => globStarCompare(l, ms)
+        case (lh :: ls, mh :: ms) if !mh.contains("*") =>
+          lh == mh && compareRoutes(ls, ms)
+        case (l @ (lh :: ls), m @ (mh :: ms))          =>
+          anystringCompare(lh, mh.split('*').toList) && compareRoutes(ls, ms)
+      }
+
     logLevelByGroup[M, List[String]](
       rootLevel,
       nameGroup,
-      (l, m) => l.startsWith(m),
+      (l, m) => l.startsWith(m) || compareRoutes(l, m),
       mappingsSorted: _*
     )
   }
@@ -264,6 +331,12 @@ object LogFilter {
    */
   def logLevelByName[M](rootLevel: LogLevel, mappings: (String, LogLevel)*): LogFilter[M] =
     logLevelByGroup[M](rootLevel, LogGroup.loggerName, mappings: _*)
+
+  def logLevelByGroup[M](group: LogGroup[M, String], config: LogLevelByNameConfig): LogFilter[M] =
+    logLevelByGroup[M](config.rootLevel, group, config.mappings.toList: _*)
+
+  def logLevelByName[M](config: LogLevelByNameConfig): LogFilter[M] =
+    logLevelByGroup[M](LogGroup.loggerName, config)
 
   private[logging] val splitNameByDotAndLevel: (String, LogLevel) => (List[String], LogLevel) = (name, level) =>
     splitNameByDot(name) -> level
@@ -313,7 +386,14 @@ object LogFilter {
         case (xFirst :: xTail, yFirst :: yTail) =>
           val r = yFirst.compareTo(xFirst)
           if (r != 0) {
-            r
+            if (xFirst.contains('*') || yFirst.contains('*')) {
+              if (xFirst == "**") 1
+              else if (yFirst == "**") -1
+              else if (xFirst == "*") 1
+              else if (yFirst == "*") -1
+              else
+                compareNames(xFirst.split('*').toList.filter(_.nonEmpty), yFirst.split('*').toList.filter(_.nonEmpty))
+            } else r
           } else compareNames(xTail, yTail)
 
         case _ => 0

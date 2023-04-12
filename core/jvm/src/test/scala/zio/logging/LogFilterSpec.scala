@@ -3,7 +3,7 @@ package zio.logging
 import zio.logging.test.TestService
 import zio.test.ZTestLogger.LogEntry
 import zio.test._
-import zio.{ Cause, Chunk, FiberId, FiberRefs, LogLevel, LogSpan, Runtime, Trace, ZIO, ZLogger }
+import zio.{ Cause, Chunk, Config, ConfigProvider, FiberId, FiberRefs, LogLevel, LogSpan, Runtime, Trace, ZIO, ZLogger }
 
 object LogFilterSpec extends ZIOSpecDefault {
 
@@ -81,25 +81,89 @@ object LogFilterSpec extends ZIOSpecDefault {
   }
 
   val spec: Spec[Environment, Any] = suite("LogFilterSpec")(
-    test("log filtering by log level and name") {
+    suite("log filtering by log level and name")(
+      test("simple paths") {
+        val filter: LogFilter[String] = LogFilter.logLevelByName(
+          LogLevel.Debug,
+          "a"     -> LogLevel.Info,
+          "a.b.c" -> LogLevel.Warning,
+          "e.f"   -> LogLevel.Error
+        )
 
-      val filter: LogFilter[String] = LogFilter.logLevelByName(
-        LogLevel.Debug,
-        "a"     -> LogLevel.Info,
-        "a.b.c" -> LogLevel.Warning,
-        "e.f"   -> LogLevel.Error
-      )
+        testFilter(filter, "x.Exec.exec", LogLevel.Debug, Assertion.isTrue) &&
+        testFilter(filter, "a.Exec.exec", LogLevel.Debug, Assertion.isFalse) &&
+        testFilter(filter, "a.Exec.exec", LogLevel.Info, Assertion.isTrue) &&
+        testFilter(filter, "a.b.Exec.exec", LogLevel.Debug, Assertion.isFalse) &&
+        testFilter(filter, "a.b.Exec.exec", LogLevel.Info, Assertion.isTrue) &&
+        testFilter(filter, "a.b.c.Exec.exec", LogLevel.Info, Assertion.isFalse) &&
+        testFilter(filter, "a.b.c.Exec.exec", LogLevel.Warning, Assertion.isTrue) &&
+        testFilter(filter, "e.Exec.exec", LogLevel.Debug, Assertion.isTrue) &&
+        testFilter(filter, "e.f.Exec.exec", LogLevel.Debug, Assertion.isFalse) &&
+        testFilter(filter, "e.f.Exec.exec", LogLevel.Error, Assertion.isTrue)
+      },
+      test("any string pattern") {
+        val filter: LogFilter[String] = LogFilter.logLevelByName(
+          LogLevel.Debug,
+          "a"     -> LogLevel.Info,
+          "a.*.c" -> LogLevel.Warning,
+          "e.f.*" -> LogLevel.Error
+        )
 
-      testFilter(filter, "x.Exec.exec", LogLevel.Debug, Assertion.isTrue) &&
-      testFilter(filter, "a.Exec.exec", LogLevel.Debug, Assertion.isFalse) &&
-      testFilter(filter, "a.Exec.exec", LogLevel.Info, Assertion.isTrue) &&
-      testFilter(filter, "a.b.Exec.exec", LogLevel.Debug, Assertion.isFalse) &&
-      testFilter(filter, "a.b.Exec.exec", LogLevel.Info, Assertion.isTrue) &&
-      testFilter(filter, "a.b.c.Exec.exec", LogLevel.Info, Assertion.isFalse) &&
-      testFilter(filter, "a.b.c.Exec.exec", LogLevel.Warning, Assertion.isTrue) &&
-      testFilter(filter, "e.Exec.exec", LogLevel.Debug, Assertion.isTrue) &&
-      testFilter(filter, "e.f.Exec.exec", LogLevel.Debug, Assertion.isFalse)
-    },
+        testFilter(filter, "x.Exec.exec", LogLevel.Debug, Assertion.isTrue) &&
+        testFilter(filter, "a.Exec.exec", LogLevel.Debug, Assertion.isFalse) &&
+        testFilter(filter, "a.Exec.exec", LogLevel.Info, Assertion.isTrue) &&
+        testFilter(filter, "a.b.Exec.exec", LogLevel.Debug, Assertion.isFalse) &&
+        testFilter(filter, "a.b2.Exec.exec", LogLevel.Debug, Assertion.isFalse) &&
+        testFilter(filter, "a.b.Exec.exec", LogLevel.Info, Assertion.isTrue) &&
+        testFilter(filter, "a.b.c.Exec.exec", LogLevel.Info, Assertion.isFalse) &&
+        testFilter(filter, "a.b2.c.Exec.exec", LogLevel.Info, Assertion.isFalse) &&
+        testFilter(filter, "a.b.c.Exec.exec", LogLevel.Warning, Assertion.isTrue) &&
+        testFilter(filter, "a.b2.c.Exec.exec", LogLevel.Warning, Assertion.isTrue) &&
+        testFilter(filter, "e.Exec.exec", LogLevel.Debug, Assertion.isTrue) &&
+        testFilter(filter, "e.f.g.Exec.exec", LogLevel.Debug, Assertion.isFalse) &&
+        testFilter(filter, "e.f.g.Exec.exec", LogLevel.Error, Assertion.isTrue)
+      },
+      test("any string and globstar patterns") {
+        val filter: LogFilter[String] = LogFilter.logLevelByName(
+          LogLevel.Debug,
+          "a"       -> LogLevel.Info,
+          "a.**.*y" -> LogLevel.Warning
+        )
+
+        testFilter(filter, "a.Exec.exec", LogLevel.Info, Assertion.isTrue) &&
+        testFilter(filter, "a.y.Exec.exec", LogLevel.Info, Assertion.isFalse) &&
+        testFilter(filter, "a.y.Exec.exec", LogLevel.Warning, Assertion.isTrue) &&
+        testFilter(filter, "a.b.y.Exec.exec", LogLevel.Warning, Assertion.isTrue) &&
+        testFilter(filter, "a.b.xy.Exec.exec", LogLevel.Warning, Assertion.isTrue) &&
+        testFilter(filter, "a.b.xyz.Exec.exec", LogLevel.Debug, Assertion.isFalse) &&
+        testFilter(filter, "a.b.xyz.Exec.exec", LogLevel.Info, Assertion.isTrue)
+      },
+      test("globstar pattern") {
+        val filter: LogFilter[String] = LogFilter.logLevelByName(
+          LogLevel.Debug,
+          "a"      -> LogLevel.Info,
+          "a.**.c" -> LogLevel.Warning,
+          "e.f.**" -> LogLevel.Error
+        )
+
+        testFilter(filter, "x.Exec.exec", LogLevel.Debug, Assertion.isTrue) &&
+        testFilter(filter, "a.Exec.exec", LogLevel.Debug, Assertion.isFalse) &&
+        testFilter(filter, "a.Exec.exec", LogLevel.Info, Assertion.isTrue) &&
+        testFilter(filter, "a.b.Exec.exec", LogLevel.Debug, Assertion.isFalse) &&
+        testFilter(filter, "a.b2.Exec.exec", LogLevel.Debug, Assertion.isFalse) &&
+        testFilter(filter, "a.b.Exec.exec", LogLevel.Info, Assertion.isTrue) &&
+        testFilter(filter, "a.b.c.Exec.exec", LogLevel.Info, Assertion.isFalse) &&
+        testFilter(filter, "a.b2.c.Exec.exec", LogLevel.Info, Assertion.isFalse) &&
+        testFilter(filter, "a.b.b2.c.Exec.exec", LogLevel.Info, Assertion.isFalse) &&
+        testFilter(filter, "a.b.c.Exec.exec", LogLevel.Warning, Assertion.isTrue) &&
+        testFilter(filter, "a.b2.c.Exec.exec", LogLevel.Warning, Assertion.isTrue) &&
+        testFilter(filter, "a.b.b2.c.Exec.exec", LogLevel.Warning, Assertion.isTrue) &&
+        testFilter(filter, "e.Exec.exec", LogLevel.Debug, Assertion.isTrue) &&
+        testFilter(filter, "e.f.Exec.exec", LogLevel.Debug, Assertion.isFalse) &&
+        testFilter(filter, "e.f.g.Exec.exec", LogLevel.Debug, Assertion.isFalse) &&
+        testFilter(filter, "e.f.g.Exec.exec", LogLevel.Error, Assertion.isTrue)
+      }
+    ),
     test("log filtering by log level and name with annotation") {
 
       val loggerName: LogGroup[Any, String] = LoggerNameExtractor.loggerNameAnnotationOrTrace.toLogGroup()
@@ -121,6 +185,53 @@ object LogFilterSpec extends ZIOSpecDefault {
       testFilterAnnotation(filter, "a.b.c.Exec.exec", LogLevel.Warning, Assertion.isTrue) &&
       testFilterAnnotation(filter, "e.Exec.exec", LogLevel.Debug, Assertion.isTrue) &&
       testFilterAnnotation(filter, "e.f.Exec.exec", LogLevel.Debug, Assertion.isFalse)
+    },
+    test("log filtering by log level and name with annotation from config") {
+
+      val configProvider = ConfigProvider.fromMap(
+        Map(
+          "logger/rootLevel"      -> LogLevel.Debug.label,
+          "logger/mappings/a"     -> LogLevel.Info.label,
+          "logger/mappings/a.b.c" -> LogLevel.Warning.label,
+          "logger/mappings/e.f"   -> LogLevel.Error.label
+        ),
+        "/"
+      )
+
+      configProvider.load(LogFilter.LogLevelByNameConfig.config.nested("logger")).map { config =>
+        val filter: LogFilter[String] = LogFilter.logLevelByName(config)
+
+        testFilterAnnotation(filter, "x.Exec.exec", LogLevel.Debug, Assertion.isTrue) &&
+        testFilterAnnotation(filter, "a.Exec.exec", LogLevel.Debug, Assertion.isFalse) &&
+        testFilterAnnotation(filter, "a.Exec.exec", LogLevel.Info, Assertion.isTrue) &&
+        testFilterAnnotation(filter, "a.b.Exec.exec", LogLevel.Debug, Assertion.isFalse) &&
+        testFilterAnnotation(filter, "a.b.Exec.exec", LogLevel.Info, Assertion.isTrue) &&
+        testFilterAnnotation(filter, "a.b.c.Exec.exec", LogLevel.Info, Assertion.isFalse) &&
+        testFilterAnnotation(filter, "a.b.c.Exec.exec", LogLevel.Warning, Assertion.isTrue) &&
+        testFilterAnnotation(filter, "e.Exec.exec", LogLevel.Debug, Assertion.isTrue) &&
+        testFilterAnnotation(filter, "e.f.Exec.exec", LogLevel.Debug, Assertion.isFalse)
+      }
+    },
+    test("log filtering by log level and name default config") {
+
+      val configProvider = ConfigProvider.fromMap(Map.empty, "/")
+
+      configProvider
+        .load(LogFilter.LogLevelByNameConfig.config.nested("logger"))
+        .map { config =>
+          assertTrue(config.rootLevel == LogLevel.Info) && assertTrue(config.mappings.isEmpty)
+        }
+    },
+    test("log filtering by log level and name config should fail on invalid values") {
+
+      val configProvider = ConfigProvider.fromMap(Map("logger/rootLevel" -> "INVALID_LOG_LEVEL"), "/")
+
+      configProvider
+        .load(LogFilter.LogLevelByNameConfig.config.nested("logger"))
+        .exit
+        .map { e =>
+          assert(e)(Assertion.failsWithA[Config.Error])
+        }
     },
     test("log filtering by log level and name matcher with annotation") {
 
@@ -254,6 +365,38 @@ object LogFilterSpec extends ZIOSpecDefault {
           "a.b.c"          -> LogLevel.Error,
           "a"              -> LogLevel.Info,
           "a"              -> LogLevel.Warning
+        )
+      ) &&
+      check(
+        Seq(
+          "a"               -> LogLevel.Warning,
+          "a"               -> LogLevel.Info,
+          "**"              -> LogLevel.Info,
+          "*"               -> LogLevel.Info,
+          "a.**.c.Service1" -> LogLevel.Warning,
+          "a.b.c.Service1"  -> LogLevel.Warning,
+          "a.*.c.Service1"  -> LogLevel.Warning,
+          "a.b.c"           -> LogLevel.Error,
+          "a.b.d"           -> LogLevel.Debug,
+          "e.f"             -> LogLevel.Error,
+          "e.*.g.*.i"       -> LogLevel.Error,
+          "e.*.g.h.*"       -> LogLevel.Error,
+          "e.f.*.h"         -> LogLevel.Error
+        ),
+        Seq(
+          "e.f.*.h"         -> LogLevel.Error,
+          "e.f"             -> LogLevel.Error,
+          "e.*.g.h.*"       -> LogLevel.Error,
+          "e.*.g.*.i"       -> LogLevel.Error,
+          "a.b.d"           -> LogLevel.Debug,
+          "a.b.c.Service1"  -> LogLevel.Warning,
+          "a.b.c"           -> LogLevel.Error,
+          "a.*.c.Service1"  -> LogLevel.Warning,
+          "a.**.c.Service1" -> LogLevel.Warning,
+          "a"               -> LogLevel.Info,
+          "a"               -> LogLevel.Warning,
+          "*"               -> LogLevel.Info,
+          "**"              -> LogLevel.Info
         )
       )
     }

@@ -2,11 +2,11 @@
 [//]: # (So please do not edit it manually. Instead, change "docs/index.md" file or sbt setting keys)
 [//]: # (e.g. "readmeDocumentation" and "readmeSupport".)
 
-# ZIO Logging
+# zio-logging
 
 [ZIO Logging](https://github.com/zio/zio-logging) is simple logging for ZIO apps, with correlation, context, and pluggable backends out of the box with integrations for common logging backends.
 
-[![Production Ready](https://img.shields.io/badge/Project%20Stage-Production%20Ready-brightgreen.svg)](https://github.com/zio/zio/wiki/Project-Stages) ![CI Badge](https://github.com/zio/zio-logging/workflows/CI/badge.svg) [![Sonatype Releases](https://img.shields.io/nexus/r/https/oss.sonatype.org/dev.zio/zio-logging_2.12.svg?label=Sonatype%20Release)](https://oss.sonatype.org/content/repositories/releases/dev/zio/zio-logging_2.12/) [![Sonatype Snapshots](https://img.shields.io/nexus/s/https/oss.sonatype.org/dev.zio/zio-logging_2.12.svg?label=Sonatype%20Snapshot)](https://oss.sonatype.org/content/repositories/snapshots/dev/zio/zio-logging_2.12/) [![javadoc](https://javadoc.io/badge2/dev.zio/zio-logging-docs_2.13/javadoc.svg)](https://javadoc.io/doc/dev.zio/zio-logging-docs_2.13) [![ZIO Logging](https://img.shields.io/github/stars/zio/zio-logging?style=social)](https://github.com/zio/zio-logging)
+[![Production Ready](https://img.shields.io/badge/Project%20Stage-Production%20Ready-brightgreen.svg)](https://github.com/zio/zio/wiki/Project-Stages) ![CI Badge](https://github.com/zio/zio-logging/workflows/CI/badge.svg) [![Sonatype Releases](https://img.shields.io/nexus/r/https/oss.sonatype.org/dev.zio/zio-logging_2.13.svg?label=Sonatype%20Release)](https://oss.sonatype.org/content/repositories/releases/dev/zio/zio-logging_2.13/) [![Sonatype Snapshots](https://img.shields.io/nexus/s/https/oss.sonatype.org/dev.zio/zio-logging_2.13.svg?label=Sonatype%20Snapshot)](https://oss.sonatype.org/content/repositories/snapshots/dev/zio/zio-logging_2.13/) [![javadoc](https://javadoc.io/badge2/dev.zio/zio-logging-docs_2.13/javadoc.svg)](https://javadoc.io/doc/dev.zio/zio-logging-docs_2.13) [![zio-logging](https://img.shields.io/github/stars/zio/zio-logging?style=social)](https://github.com/zio/zio-logging)
 
 ## Introduction
 
@@ -27,23 +27,26 @@ Key features of ZIO Logging:
 In order to use this library, we need to add the following line in our `build.sbt` file:
 
 ```scala
-libraryDependencies += "dev.zio" %% "zio-logging" % "2.1.8"
+libraryDependencies += "dev.zio" %% "zio-logging" % "2.1.12"
 ```
 
 There are also some optional dependencies:
 
 ```scala
 // JPL integration
-libraryDependencies += "dev.zio" %% "zio-logging-jpl" % "2.1.8"
+libraryDependencies += "dev.zio" %% "zio-logging-jpl" % "2.1.12"
 
-// SLF4j integration
-libraryDependencies += "dev.zio" %% "zio-logging-slf4j" % "2.1.8"
+// SLF4j v1 integration
+libraryDependencies += "dev.zio" %% "zio-logging-slf4j" % "2.1.12"
+
+// SLF4j v2 integration
+libraryDependencies += "dev.zio" %% "zio-logging-slf4j2" % "2.1.12"
 
 // Using ZIO Logging for SLF4j v1 loggers, usually third-party non-ZIO libraries
-libraryDependencies += "dev.zio" %% "zio-logging-slf4j-bridge" % "2.1.8"
+libraryDependencies += "dev.zio" %% "zio-logging-slf4j-bridge" % "2.1.12"
 
 // Using ZIO Logging for SLF4j v2 loggers, usually third-party non-ZIO libraries
-libraryDependencies += "dev.zio" %% "zio-logging-slf4j2-bridge" % "2.1.8"
+libraryDependencies += "dev.zio" %% "zio-logging-slf4j2-bridge" % "2.1.12"
 ```
 
 ## Example
@@ -55,13 +58,15 @@ The recommended place for setting the logger is application boostrap. In this ca
 [//]: # (TODO: make snippet type-checked using mdoc)
 
 ```scala
-import zio.logging.{ LogFormat, console }
+package zio.logging.example
+
+import zio.logging.consoleLogger
 import zio.{ ExitCode, Runtime, Scope, ZIO, ZIOAppArgs, ZIOAppDefault, ZLayer }
 
 object SimpleApp extends ZIOAppDefault {
 
   override val bootstrap: ZLayer[ZIOAppArgs, Any, Any] =
-    Runtime.removeDefaultLoggers >>> console(LogFormat.default)
+    Runtime.removeDefaultLoggers >>> consoleLogger()
 
   override def run: ZIO[Scope, Any, ExitCode] =
     for {
@@ -76,16 +81,16 @@ object SimpleApp extends ZIOAppDefault {
 Expected console output:
 
 ```
-timestamp=2022-10-28T18:40:25.517623+02:00 level=INFO thread=zio-fiber-6 message="Start"
-timestamp=2022-10-28T18:40:25.54676+02:00  level=ERROR thread=zio-fiber-0 message="" cause=Exception in thread "zio-fiber-6" java.lang.String: FAILURE
-	at zio.logging.example.SimpleApp.run(SimpleApp.scala:14)
+timestamp=2023-03-15T08:36:24.421098+01:00 level=INFO thread=zio-fiber-4 message="Start"
+timestamp=2023-03-15T08:36:24.440181+01:00 level=ERROR thread=zio-fiber-0 message="" cause=Exception in thread "zio-fiber-4" java.lang.String: FAILURE
+	at zio.logging.example.SimpleApp.run(SimpleApp.scala:29)
 ```
 
-You can find the source code of examples [here](https://github.com/zio/zio-logging/tree/master/examples/src/main/scala/zio/logging/example)
+You can find the source code of examples [here](https://github.com/zio/zio-logging/tree/master/examples)
 
 ## Documentation
 
-Learn more on the [ZIO Logging homepage](https://zio.dev/zio-logging/)!
+Learn more on the [zio-logging homepage](https://zio.dev/zio-logging)!
 
 ## Contributing
 
